@@ -1,8 +1,6 @@
 package com.example.streetfoodandcafe.ui.module
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -12,15 +10,23 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.streetfoodandcafe.R
 import com.example.streetfoodandcafe.db.AppDatabase
 import com.example.streetfoodandcafe.db.InventoryEntity
 import com.example.streetfoodandcafe.db.OrderWithItems
+import com.example.streetfoodandcafe.slip.SlipPrinterBitmap // Import Printer
+import com.example.streetfoodandcafe.ui.module.data.CartItem // Import CartItem wrapper
+import com.example.streetfoodandcafe.db.OrderItemEntity
+import com.example.streetfoodandcafe.slip.SlipPrinter
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -38,7 +44,6 @@ fun CustomerScreen() {
 
     // --- STATE ---
     val ordersWithItemsState = customerDao.getAllOrdersWithItems().collectAsState(initial = emptyList())
-    // Observe inventory items to map IDs to Names
     val allInventoryItemsState = inventoryDao.getAllInventoryItems().collectAsState(initial = emptyList())
 
     // Create a Map for quick lookup: ID -> InventoryEntity
@@ -100,52 +105,107 @@ fun CustomerScreen() {
             }
 
             // --- ORDERS LIST ---
-            LazyColumn(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                groupedOrders.forEach { (dateString, ordersForDate) ->
-                    item {
-                        Text(
-                            text = dateString,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                        Divider(modifier = Modifier.padding(vertical = 4.dp))
-                    }
-
-                    items(ordersForDate) { orderWithItems ->
-                        OrderCard(orderWithItems, inventoryMap)
-                    }
-
-                    item {
-                        val dailyTotal = ordersForDate.sumOf { it.order.totalAmount }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
-                        ) {
+            if (orders.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No orders yet. Add one!", color = Color.Gray)
+                }
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    groupedOrders.forEach { (dateString, ordersForDate) ->
+                        item {
                             Text(
-                                text = "Daily Total: ₹${"%.2f".format(dailyTotal)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Bold
+                                text = dateString,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                            Divider(modifier = Modifier.padding(vertical = 4.dp))
+                        }
+
+                        items(ordersForDate) { orderWithItems ->
+                            OrderCard(
+                                orderData = orderWithItems,
+                                inventoryMap = inventoryMap,
+                                onPrintClick = {
+                                    // --- PRINT LOGIC ---
+                                    val printer = SlipPrinter(context)
+
+                                    // 1. Reconstruct CartItems from DB Entities
+                                    val cartItemsForPrint = orderWithItems.items.mapNotNull { orderItem ->
+                                        val inventoryEntity = inventoryMap[orderItem.foodItemId]
+                                        if (inventoryEntity != null) {
+                                            // Determine variant name for printing
+                                            // Logic: If price matches full/half, label it. Else Standard.
+                                            val variantName = if (inventoryEntity.isMultiPlate) {
+                                                when (orderItem.itemPriceAtTime) {
+                                                    inventoryEntity.fullPlatePrice -> "Full"
+                                                    inventoryEntity.halfPlatePrice -> "Half"
+                                                    else -> "Custom"
+                                                }
+                                            } else {
+                                                "Standard"
+                                            }
+
+                                            // Create a temporary CartItem for the printer
+                                            // Note: CartItem expects MutableIntState, we create one with static value
+                                         CartItem(
+                                                item = inventoryEntity,
+                                                variant = variantName,
+                                                unitPrice = orderItem.itemPriceAtTime,
+                                                count = mutableIntStateOf(orderItem.quantityCount)
+                                            )
+                                        } else {
+                                            null
+                                        }
+                                    }
+
+                                    // 2. Call Printer
+                                    printer.clickAndPrint(
+                                        context,
+                                        orderWithItems.order.customerName,
+                                        orderWithItems.order.mobileNo,
+                                        cartItemsForPrint,
+                                        orderWithItems.order.totalAmount,
+                                        orderWithItems.order.orderId.toLong()
+                                    )
+
+                                    Toast.makeText(context, "Slip Generated for Order #${orderWithItems.order.orderId}", Toast.LENGTH_SHORT).show()
+                                }
                             )
                         }
+
+                        item {
+                            val dailyTotal = ordersForDate.sumOf { it.order.totalAmount }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                Text(
+                                    text = "Daily Total: ₹${"%.2f".format(dailyTotal)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
                     }
+                    item { Spacer(modifier = Modifier.height(80.dp)) }
                 }
-                item { Spacer(modifier = Modifier.height(80.dp)) }
             }
         }
     }
 
+    // --- ADD ORDER SHEET ---
     if (showAddOrderSheet) {
         ModalBottomSheet(
             onDismissRequest = { showAddOrderSheet = false },
             sheetState = sheetState
         ) {
-            AddOrderSheet (
+            AddOrderSheet(
                 inventoryList = allInventoryItemsState.value,
                 onOrderSaved = {
                     scope.launch { sheetState.hide() }.invokeOnCompletion {
@@ -165,7 +225,8 @@ fun CustomerScreen() {
 @Composable
 fun OrderCard(
     orderData: OrderWithItems,
-    inventoryMap: Map<Int, InventoryEntity>
+    inventoryMap: Map<Int, InventoryEntity>,
+    onPrintClick: () -> Unit // Callback for printing
 ) {
     Card(
         elevation = CardDefaults.cardElevation(2.dp),
@@ -178,7 +239,10 @@ fun OrderCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 // Customer Mobile + Name
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f) // Let text take available space
+                ) {
                     Icon(
                         imageVector = Icons.Default.Person,
                         contentDescription = null,
@@ -186,34 +250,54 @@ fun OrderCard(
                         tint = MaterialTheme.colorScheme.secondary
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = orderData.order.mobileNo,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
 
-                    if (orderData.order.customerName.isNotBlank() &&
-                        orderData.order.customerName != orderData.order.mobileNo &&
-                        orderData.order.customerName != "Guest"
-                    ) {
+                    Column {
                         Text(
-                            text = " (${orderData.order.customerName})",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.secondary,
-                            fontWeight = FontWeight.Normal
+                            text = orderData.order.mobileNo,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
                         )
+                        if (orderData.order.customerName.isNotBlank() &&
+                            orderData.order.customerName != orderData.order.mobileNo &&
+                            orderData.order.customerName != "Guest"
+                        ) {
+                            Text(
+                                text = " (${orderData.order.customerName})",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.secondary,
+                                fontWeight = FontWeight.Normal
+                            )
+                        }
                     }
                 }
 
-                // Order Amount
-                Text(
-                    text = "₹${orderData.order.totalAmount}",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                // Amount + Print Button
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "₹${orderData.order.totalAmount}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    // --- PRINT BUTTON ---
+                    IconButton(
+                        onClick = onPrintClick,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_print),
+                            contentDescription = "Print Slip",
+                            tint = Color.DarkGray
+                        )
+                    }
+                }
             }
 
+            Spacer(modifier = Modifier.height(8.dp))
+            Divider(color = Color.LightGray.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(8.dp))
 
             // List of items in this order
@@ -222,23 +306,31 @@ fun OrderCard(
                     val inventoryItem = inventoryMap[item.foodItemId]
                     val foodName = inventoryItem?.foodName ?: "Item #${item.foodItemId}"
 
-                    // Determine variant string (Full/Half)
                     val variantText = if (inventoryItem != null && inventoryItem.isMultiPlate) {
-                        // Infer variant based on price stored in order vs inventory price
                         when (item.itemPriceAtTime) {
                             inventoryItem.fullPlatePrice -> "(Full)"
                             inventoryItem.halfPlatePrice -> "(Half)"
-                            else -> "" // Price changed or custom
+                            else -> ""
                         }
                     } else {
                         ""
                     }
 
-                    Text(
-                        text = "• $foodName $variantText x ${item.quantityCount} (₹${item.itemPriceAtTime})",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "• $foodName $variantText x ${item.quantityCount}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.DarkGray
+                        )
+                        Text(
+                            text = "₹${item.itemPriceAtTime * item.quantityCount}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                    }
                 }
             }
         }
