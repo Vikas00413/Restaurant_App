@@ -1,5 +1,6 @@
 package com.example.streetfoodandcafe.ui.module
 
+
 import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -14,10 +15,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-
 import androidx.compose.ui.unit.dp
 import com.example.streetfoodandcafe.db.AppDatabase
-
 import com.example.streetfoodandcafe.db.InventoryEntity
 import com.example.streetfoodandcafe.ui.module.data.InventoryItem
 import kotlinx.coroutines.launch
@@ -28,7 +27,9 @@ fun InventoryEntity.toUiModel(): InventoryItem {
         id = this.id,
         foodName = this.foodName,
         price = this.price,
-        quantityType = this.quantityType,
+        isMultiPlate = this.isMultiPlate,
+        fullPlatePrice = this.fullPlatePrice,
+        halfPlatePrice = this.halfPlatePrice,
         customImageUri = this.imageUriString?.let { Uri.parse(it) }
     )
 }
@@ -128,14 +129,16 @@ fun InventoryScreen() {
         ) {
             AddItemSheet(
                 existingItem = itemToEdit,
-                onSaveItem = { name, price, qty, imageUri ->
+                onSaveItem = { name, price, isMulti, fullPrice, halfPrice, imageUri ->
                     scope.launch {
                         if (itemToEdit == null) {
                             // --- DB ADD LOGIC ---
                             val newEntity = InventoryEntity(
                                 foodName = name,
                                 price = price,
-                                quantityType = qty,
+                                isMultiPlate = isMulti,
+                                fullPlatePrice = fullPrice,
+                                halfPlatePrice = halfPrice,
                                 imageUriString = imageUri?.toString()
                             )
                             dao.insertItem(newEntity)
@@ -145,7 +148,9 @@ fun InventoryScreen() {
                                 id = itemToEdit!!.id, // Use existing ID
                                 foodName = name,
                                 price = price,
-                                quantityType = qty,
+                                isMultiPlate = isMulti,
+                                fullPlatePrice = fullPrice,
+                                halfPlatePrice = halfPrice,
                                 imageUriString = imageUri?.toString()
                             )
                             dao.updateItem(updatedEntity)
@@ -177,7 +182,9 @@ fun InventoryScreen() {
                     id = itemToDelete!!.id,
                     foodName = itemToDelete!!.foodName,
                     price = itemToDelete!!.price,
-                    quantityType = itemToDelete!!.quantityType,
+                    isMultiPlate = itemToDelete!!.isMultiPlate,
+                    fullPlatePrice = itemToDelete!!.fullPlatePrice,
+                    halfPlatePrice = itemToDelete!!.halfPlatePrice,
                     imageUriString = itemToDelete!!.customImageUri?.toString()
                 )
 

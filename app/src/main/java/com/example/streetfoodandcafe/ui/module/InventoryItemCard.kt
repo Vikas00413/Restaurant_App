@@ -7,7 +7,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,8 +29,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import coil.compose.rememberAsyncImagePainter
 import com.example.streetfoodandcafe.ui.module.data.InventoryItem
 
 @Composable
@@ -37,69 +42,109 @@ fun InventoryItemCard(
     onDeleteClick: () -> Unit
 ) {
     Card(
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp), // Slightly lower elevation for cleaner look
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(110.dp), // Fixed compact height for the card
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(12.dp) // Defined shape for the card
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
+            modifier = Modifier.fillMaxSize(), // Row fills the card
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // --- 1. IMAGE (Left Side) ---
+            // --- 1. IMAGE (Left Side - Full Height) ---
             Box(
                 modifier = Modifier
-                    .size(60.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .width(110.dp) // Square ratio based on height
+                    .fillMaxHeight()
+                    // Only round the top-left and bottom-left to match card
+                    .clip(RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp))
                     .background(Color.Gray.copy(alpha = 0.2f)),
                 contentAlignment = Alignment.Center
             ) {
-                Image(
-                    imageVector = item.imageVector,
-                    contentDescription = item.foodName,
-                    modifier = Modifier.size(32.dp),
-                )
+                if (item.customImageUri != null) {
+                    Image(
+                        painter = rememberAsyncImagePainter(item.customImageUri),
+                        contentDescription = item.foodName,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop // Ensures image covers the full box area
+                    )
+                } else {
+                    Image(
+                        imageVector = item.imageVector,
+                        contentDescription = item.foodName,
+                        modifier = Modifier.size(40.dp)
+                    )
+                }
             }
-
-            Spacer(modifier = Modifier.width(16.dp))
 
             // --- 2. DETAILS (Middle) ---
             Column(
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(vertical = 8.dp, horizontal = 12.dp) // Add padding here since we removed it from Row
             ) {
                 Text(
                     text = item.foodName,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1 // Prevent overflow
                 )
-                Text(
-                    text = "Size: ${item.quantityType}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "$${item.price}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold
-                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                if (item.isMultiPlate) {
+                    // Show Full and Half prices
+                    item.fullPlatePrice?.let {
+                        Text(
+                            text = "Full: ₹$it",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    item.halfPlatePrice?.let {
+                        Text(
+                            text = "Half: ₹$it",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.secondary,
+                            fontWeight = FontWeight.Normal
+                        )
+                    }
+                } else {
+                    // Standard Price
+                    Text(
+                        text = "Price: ₹${item.price}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
-            // --- 3. ACTIONS (Right Side) ---
-            Row(horizontalArrangement = Arrangement.End) {
+            // --- 3. ACTION BUTTONS (Right Side) ---
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .padding(end = 4.dp), // Minimal padding on the right edge
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.Center
+            ) {
                 IconButton(onClick = onEditClick) {
                     Icon(
                         imageVector = Icons.Default.Edit,
                         contentDescription = "Edit",
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp) // Slightly smaller icons
                     )
                 }
                 IconButton(onClick = onDeleteClick) {
                     Icon(
                         imageVector = Icons.Default.Delete,
                         contentDescription = "Delete",
-                        tint = MaterialTheme.colorScheme.error
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }

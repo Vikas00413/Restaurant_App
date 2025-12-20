@@ -1,11 +1,11 @@
 package com.example.streetfoodandcafe.ui.module
 
-import android.Manifest
-import android.content.Context
-import android.content.pm.PackageManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
@@ -43,23 +43,30 @@ import java.util.Locale
 
 @Composable
 fun AddItemSheet(
-    existingItem: InventoryItem? = null, // <--- 1. Add optional item for editing
-    onSaveItem: (name: String, price: Double, quantityType: String, imageUri: Uri?) -> Unit, // Renamed from onAddItem
+    existingItem: InventoryItem? = null,
+    onSaveItem: (name: String, price: Double, isMulti: Boolean, fullPrice: Double?, halfPrice: Double?, imageUri: Uri?) -> Unit,
     onCancel: () -> Unit
 ) {
     val context = LocalContext.current
 
-    // --- State Variables (Initialize with existing data if available) ---
+    // --- State Variables ---
     var name by remember { mutableStateOf(existingItem?.foodName ?: "") }
-    var price by remember { mutableStateOf(existingItem?.price?.toString() ?: "") }
-    var quantityType by remember { mutableStateOf(existingItem?.quantityType ?: "Full") }
+
+    // Standard Price (used if Multi-Plate is unchecked)
+    var standardPrice by remember { mutableStateOf(existingItem?.price?.toString() ?: "") }
+
+    // Multi-Plate Toggle & Prices
+    var isMultiPlate by remember { mutableStateOf(existingItem?.isMultiPlate ?: false) }
+    var fullPrice by remember { mutableStateOf(existingItem?.fullPlatePrice?.toString() ?: "") }
+    var halfPrice by remember { mutableStateOf(existingItem?.halfPlatePrice?.toString() ?: "") }
+
     var selectedImageUri by remember { mutableStateOf(existingItem?.customImageUri) }
 
     // State for the temporary camera file URI
     var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
     var showImageSourceDialog by remember { mutableStateOf(false) }
 
-    // --- Launchers (Same as before) ---
+    // --- Launchers ---
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
@@ -92,7 +99,7 @@ fun AddItemSheet(
             .padding(bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // --- 2. Dynamic Title ---
+        // --- Dynamic Title ---
         Text(
             text = if (existingItem == null) "Add New Item" else "Edit Item",
             style = MaterialTheme.typography.headlineSmall,
@@ -136,40 +143,60 @@ fun AddItemSheet(
             }
         }
 
-        // --- Form Fields ---
+        // --- Food Name (Optional) ---
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
-            label = { Text("Food Name") },
+            label = { Text("Food Name (Optional)") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true
         )
 
-        OutlinedTextField(
-            value = price,
-            onValueChange = { if (it.all { char -> char.isDigit() || char == '.' }) price = it },
-            label = { Text("Price") },
-            modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            singleLine = true,
-            prefix = { Text("$") }
-        )
+        // --- Multi-Plate Toggle ---
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Checkbox(
+                checked = isMultiPlate,
+                onCheckedChange = { isMultiPlate = it }
+            )
+            Text(text = "Enable Full / Half Plate Pricing")
+        }
 
-        // --- Quantity Buttons ---
-        Text(text = "Quantity Type:", style = MaterialTheme.typography.labelLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("Full", "Half").forEach { type ->
-                val isSelected = type == quantityType
-                Button(
-                    onClick = { quantityType = type },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
-                    )
-                ) {
-                    Text(type)
-                }
-            }
+        if (isMultiPlate) {
+            // --- FULL PLATE PRICE ---
+            OutlinedTextField(
+                value = fullPrice,
+                onValueChange = { if (it.all { char -> char.isDigit() || char == '.' }) fullPrice = it },
+                label = { Text("Full Plate Price") },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                prefix = { Text("₹") }
+            )
+
+            // --- HALF PLATE PRICE (Optional) ---
+            OutlinedTextField(
+                value = halfPrice,
+                onValueChange = { if (it.all { char -> char.isDigit() || char == '.' }) halfPrice = it },
+                label = { Text("Half Plate Price (Optional)") },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                prefix = { Text("₹") }
+            )
+        } else {
+            // --- STANDARD PRICE ---
+            OutlinedTextField(
+                value = standardPrice,
+                onValueChange = { if (it.all { char -> char.isDigit() || char == '.' }) standardPrice = it },
+                label = { Text("Price") },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                prefix = { Text("₹") }
+            )
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -186,20 +213,33 @@ fun AddItemSheet(
             Spacer(modifier = Modifier.width(8.dp))
             Button(
                 onClick = {
-                    val priceValue = price.toDoubleOrNull() ?: 0.0
-                    if (name.isNotBlank() && priceValue > 0) {
-                        onSaveItem(name, priceValue, quantityType, selectedImageUri)
+                    val pStandard = standardPrice.toDoubleOrNull() ?: 0.0
+                    val pFull = fullPrice.toDoubleOrNull()
+                    val pHalf = halfPrice.toDoubleOrNull()
+
+                    // Validation:
+                    // 1. If MultiPlate is ON: Full Price must be valid (> 0)
+                    // 2. If MultiPlate is OFF: Standard Price must be valid (> 0)
+                    val isValid = if (isMultiPlate) (pFull != null && pFull > 0) else (pStandard > 0)
+
+                    if (isValid) {
+                        val finalName = if (name.isBlank()) "Unnamed Item" else name
+
+                        // If multiplate is active, we pass 0.0 as standard price fallback
+                        val saveStandard = if (isMultiPlate) (pFull ?: 0.0) else pStandard
+
+                        onSaveItem(finalName, saveStandard, isMultiPlate, pFull, pHalf, selectedImageUri)
                     }
                 },
-                enabled = name.isNotBlank() && price.isNotBlank()
+                // Basic UI enable check (doesn't block validation inside onClick, but gives visual cue)
+                enabled = true
             ) {
-                // --- 3. Dynamic Button Text ---
                 Text(if (existingItem == null) "Add Item" else "Update Item")
             }
         }
     }
 
-    // --- Source Selection Dialog (Unchanged) ---
+    // --- Source Selection Dialog ---
     if (showImageSourceDialog) {
         AlertDialog(
             onDismissRequest = { showImageSourceDialog = false },
@@ -231,7 +271,7 @@ fun AddItemSheet(
     }
 }
 
-// --- Helper Function (Unchanged) ---
+// --- Helper Function ---
 fun createImageFileUri(context: Context): Uri {
     val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
     val storageDir = context.getExternalFilesDir(Environment.DIRECTORY_PICTURES)
