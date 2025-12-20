@@ -143,13 +143,14 @@ fun AddItemSheet(
             }
         }
 
-        // --- Food Name (Optional) ---
+        // --- Food Name (Mandatory) ---
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
-            label = { Text("Food Name (Optional)") },
+            label = { Text("Food Name") }, // Removed "(Optional)"
             modifier = Modifier.fillMaxWidth(),
-            singleLine = true
+            singleLine = true,
+            isError = name.isBlank() // Visual cue if empty
         )
 
         // --- Multi-Plate Toggle ---
@@ -217,22 +218,17 @@ fun AddItemSheet(
                     val pFull = fullPrice.toDoubleOrNull()
                     val pHalf = halfPrice.toDoubleOrNull()
 
-                    // Validation:
-                    // 1. If MultiPlate is ON: Full Price must be valid (> 0)
-                    // 2. If MultiPlate is OFF: Standard Price must be valid (> 0)
-                    val isValid = if (isMultiPlate) (pFull != null && pFull > 0) else (pStandard > 0)
+                    // Validation: Name must be present + Price conditions
+                    val isPriceValid = if (isMultiPlate) (pFull != null && pFull > 0) else (pStandard > 0)
 
-                    if (isValid) {
-                        val finalName = if (name.isBlank()) "Unnamed Item" else name
-
-                        // If multiplate is active, we pass 0.0 as standard price fallback
+                    if (name.isNotBlank() && isPriceValid) {
                         val saveStandard = if (isMultiPlate) (pFull ?: 0.0) else pStandard
-
-                        onSaveItem(finalName, saveStandard, isMultiPlate, pFull, pHalf, selectedImageUri)
+                        onSaveItem(name, saveStandard, isMultiPlate, pFull, pHalf, selectedImageUri)
                     }
                 },
-                // Basic UI enable check (doesn't block validation inside onClick, but gives visual cue)
-                enabled = true
+                // Button is disabled if name is blank
+                enabled = name.isNotBlank() &&
+                        (if (isMultiPlate) (fullPrice.toDoubleOrNull() ?: 0.0) > 0 else (standardPrice.toDoubleOrNull() ?: 0.0) > 0)
             ) {
                 Text(if (existingItem == null) "Add Item" else "Update Item")
             }
