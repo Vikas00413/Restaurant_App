@@ -87,8 +87,8 @@ fun AddOrderSheet(
         inventoryList.filter { it.foodName.contains(searchQuery, ignoreCase = true) }
     }
 
-    // Calculate Total
-    val currentTotal = cartItems.sumOf { it.unitPrice * it.count }
+    // Calculate Total (Accessing .intValue)
+    val currentTotal = cartItems.sumOf { it.unitPrice * it.count.intValue }
 
     Column(
         modifier = Modifier
@@ -104,7 +104,6 @@ fun AddOrderSheet(
         Spacer(modifier = Modifier.height(16.dp))
 
         // --- Customer Details ---
-        // 1. Mobile Number (First, Full Width)
         OutlinedTextField(
             value = mobileNo,
             onValueChange = { if (it.length <= 10 && it.all { c -> c.isDigit() }) mobileNo = it },
@@ -116,7 +115,6 @@ fun AddOrderSheet(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // 2. Customer Name (Second, Full Width)
         OutlinedTextField(
             value = customerName,
             onValueChange = { customerName = it },
@@ -142,10 +140,9 @@ fun AddOrderSheet(
         Spacer(modifier = Modifier.height(8.dp))
 
         // --- Content Area (Menu + Cart) ---
-        // We use a Box with weight to fill remaining space
         Column(modifier = Modifier.weight(1f)) {
 
-            // 1. MENU LIST (Visible if search is active or cart is empty, or split view)
+            // 1. MENU LIST
             Text("Menu", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
 
             LazyColumn(
@@ -160,11 +157,9 @@ fun AddOrderSheet(
                         item = item,
                         onAddClick = {
                             if (item.isMultiPlate) {
-                                // Open Dialog for Full/Half
                                 selectedMultiPlateItem = item
                                 showVariantDialog = true
                             } else {
-                                // Add Standard Item directly
                                 addToCart(cartItems, item, "Standard", item.price)
                             }
                         }
@@ -174,21 +169,26 @@ fun AddOrderSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 2. CART LIST (Visible only if items exist)
+            // 2. CART LIST
             if (cartItems.isNotEmpty()) {
                 Text("Your Cart", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                 LazyColumn(
-                    modifier = Modifier.weight(0.8f), // Takes less space than menu
+                    modifier = Modifier.weight(0.8f),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(bottom = 8.dp)
                 ) {
                     items(cartItems) { cartItem ->
                         CartItemCard(
                             cartItem = cartItem,
-                            onIncrease = { cartItem.count++ },
+                            // LOGIC: Increase count
+                            onIncrease = { cartItem.count.intValue++ },
+                            // LOGIC: Decrease count or remove
                             onDecrease = {
-                                if (cartItem.count > 1) cartItem.count--
-                                else cartItems.remove(cartItem)
+                                if (cartItem.count.intValue > 1) {
+                                    cartItem.count.intValue--
+                                } else {
+                                    cartItems.remove(cartItem)
+                                }
                             }
                         )
                     }
@@ -238,8 +238,8 @@ fun AddOrderSheet(
                                     OrderItemEntity(
                                         orderOwnerId = orderId.toInt(),
                                         foodItemId = cItem.item.id,
-                                        quantityCount = cItem.count,
-                                        itemPriceAtTime = cItem.unitPrice // Save the variant price
+                                        quantityCount = cItem.count.intValue, // Access intValue
+                                        itemPriceAtTime = cItem.unitPrice
                                     )
                                 }
                                 customerDao.insertOrderItems(orderItemsEntities)
@@ -267,7 +267,6 @@ fun AddOrderSheet(
             title = { Text("Select Portion for ${item.foodName}") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Full Plate Option
                     item.fullPlatePrice?.let { price ->
                         Button(
                             onClick = {
@@ -284,7 +283,6 @@ fun AddOrderSheet(
                         }
                     }
 
-                    // Half Plate Option
                     item.halfPlatePrice?.let { price ->
                         Button(
                             onClick = {
@@ -321,12 +319,11 @@ fun addToCart(
     variant: String,
     price: Double
 ) {
-    // Check if this specific item+variant already exists
     val existing = cartList.find { it.item.id == item.id && it.variant == variant }
     if (existing != null) {
-        existing.count++
+        existing.count.intValue++ // Access intValue
     } else {
-        cartList.add(CartItem(item, variant, price, 1))
+        cartList.add(CartItem(item, variant, price)) // Init with default 1
     }
 }
 
@@ -376,7 +373,6 @@ fun CartItemCard(cartItem: CartItem, onIncrease: () -> Unit, onDecrease: () -> U
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                // Name + Variant (e.g., "Burger (Full)")
                 Text(
                     text = "${cartItem.item.foodName} ${if(cartItem.variant != "Standard") "(${cartItem.variant})" else ""}",
                     fontWeight = FontWeight.SemiBold
@@ -385,23 +381,33 @@ fun CartItemCard(cartItem: CartItem, onIncrease: () -> Unit, onDecrease: () -> U
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // DELETE / DECREASE BUTTON
                 IconButton(onClick = onDecrease, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Delete, "Remove") // Changed to Remove icon for clarity
+                    // Visual logic: if count is 1, show delete icon, else show remove (minus) icon
+                    if (cartItem.count.intValue == 1) {
+                        Icon(Icons.Default.Delete, "Remove", tint = MaterialTheme.colorScheme.error)
+                    } else {
+                        Icon(Icons.Default.Delete, "Decrease")
+                    }
                 }
+
+                // COUNT DISPLAY
                 Text(
-                    text = "${cartItem.count}",
+                    text = "${cartItem.count.intValue}", // Access intValue
                     modifier = Modifier.padding(horizontal = 8.dp),
                     fontWeight = FontWeight.Bold
                 )
+
+                // ADD / INCREASE BUTTON
                 IconButton(onClick = onIncrease, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Add, "Add")
+                    Icon(Icons.Default.Add, "Increase")
                 }
             }
 
             Spacer(modifier = Modifier.width(8.dp))
 
             Text(
-                text = "₹${cartItem.unitPrice * cartItem.count}",
+                text = "₹${cartItem.unitPrice * cartItem.count.intValue}", // Access intValue
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary
             )
