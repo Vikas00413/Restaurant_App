@@ -6,6 +6,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.util.Log;
 
 
 import com.example.streetfoodandcafe.ui.module.data.CartItem;
@@ -201,14 +202,18 @@ public class SlipPrinterBitmap {
             FileOutputStream fos = new FileOutputStream(slipTailFilePath);
             OutputStreamWriter writer = new OutputStreamWriter(fos);
 
-            writer.write(Constants.ORTALA + "Thank You!");
-            writer.write("\n");
-            writer.write(Constants.ORTALA + "Please Visit Again");
-            writer.write("\n");
-            writer.write(Constants.ORTALA + " ");
-            writer.write("\n");
-            writer.write(Constants.ORTALA + "."); // End marker
-            writer.write("\n");
+            // 1. Build the string content first
+            StringBuilder footerContent = new StringBuilder();
+            footerContent.append(Constants.ORTALA).append("Thank You!").append("\n");
+            footerContent.append(Constants.ORTALA).append("Please Visit Again").append("\n");
+            footerContent.append(Constants.ORTALA).append(" ").append("\n");
+            footerContent.append(Constants.ORTALA).append(".").append("\n"); // End marker
+
+            // 2. Log the content you are about to write
+            android.util.Log.d("Print", "Writing to slipTailFilePath:\n" + footerContent.toString());
+
+            // 3. Write the built string to the file
+            writer.write(footerContent.toString());
 
             writer.close();
         } catch (IOException e) {
