@@ -1,170 +1,109 @@
-package com.example.streetfoodandcafe.slip;
+package com.example.streetfoodandcafe.slip
 
+import android.content.Context
+import android.util.Log
+import android.widget.Toast
+import androidx.compose.ui.text.intl.Locale
+import com.dantsu.escposprinter.*
+import com.dantsu.escposprinter.connection.bluetooth.BluetoothPrintersConnections
+import com.example.streetfoodandcafe.ui.module.data.CartItem
+import java.text.SimpleDateFormat
+import java.util.Date
+import kotlin.text.format
 
-import android.content.ContentValues;
-import android.content.Context;
-import android.content.res.Resources;
-import android.graphics.Bitmap;
+class SlipPrinter(var context: Context) {
+    private lateinit var printer: EscPosPrinter
 
-import android.graphics.Canvas;
-import android.graphics.drawable.Drawable;
-import android.net.Uri;
-import android.os.Build;
-import android.provider.MediaStore;
-import android.util.Log;
-
-import com.example.streetfoodandcafe.R;
-import com.example.streetfoodandcafe.ui.module.data.CartItem;
-
-import java.io.File;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.util.List;
-import android.os.Environment;
-
-import android.widget.Toast;
-public class SlipPrinter extends Thread {
-    private Context context;
-
-    public String tag = "PrintActivity-Cagri";
-
-    int ret = -1;
-
-    private boolean m_bThreadFinished = true;
-
-    POSAPIHelper PosAPI = POSAPIHelper.getInstance();
-
-    SlipPrinter printThread = null;
-
-    public SlipPrinter(Context context) {
-        this.context = context;
-    }
-
-    SlipPrinterBitmap slip = new SlipPrinterBitmap();
-
-    private Bitmap makeSmallerBitmap(Bitmap myBitmap, Integer maxSize) {
-        if (myBitmap != null) {
-            Integer width = myBitmap.getWidth();
-            Integer height = myBitmap.getHeight();
-            Double bitmapRatio = (width.doubleValue() / height.doubleValue());
-
-            if (bitmapRatio > 1) {
-                width = maxSize;
-                Double scaledHeight = width / bitmapRatio;
-                height = scaledHeight.intValue();
-            } else {
-                height = maxSize;
-                Double scaledWidth = height * bitmapRatio;
-                width = scaledWidth.intValue();
-            }
-
-            return Bitmap.createScaledBitmap(myBitmap, width, height, true);
-        } else {
-            Log.e("SlipPrinter", "Error: Bitmap is null. Cannot resize.");
-            // Handle the error (show a toast, use a placeholder image, etc.)
-            return null;
+    fun printBill(
+        customerName: String,
+        mobileNo: String,
+        items: List<CartItem>,
+        totalAmount: Double,
+        orderId: Long
+    ) {
+        // Step 1: Scan & Connect Bluetooth
+        val bluetoothPrinters = BluetoothPrintersConnections().list
+        if (bluetoothPrinters == null || bluetoothPrinters.isEmpty()) {
+            Toast.makeText(context, "No Bluetooth printers found", Toast.LENGTH_SHORT).show()
+            return
         }
 
-    }
+        val printerConnection = bluetoothPrinters[0] // First paired printer
+        // Note: 203dpi is standard, 48f is width in mm (58mm printer usually prints ~48mm width), 32 is char limit per line
+        val printer = EscPosPrinter(printerConnection, 203, 48f, 32)
 
-    public void clickAndPrint(Context context, String customerName, String mobileNo, List<CartItem> cartItems, double totalAmount, long orderId) {
-        slip.generateSlip(context,customerName,mobileNo,cartItems,totalAmount,orderId);
-        if (printThread != null && !printThread.isThreadFinished()) {
-            Log.e(tag, "Thread is still running...");
-            return;
-        }
-
-        synchronized (this) {
-
-            Resources resources = context.getResources();
-            ret = PosAPI.PrintInit(2, 24, 24, 0);
-            PosAPI.PrintSetGray(5);
-
-            Print.PrintSetFont((byte) 24, (byte) 24, (byte) 2);
-
-            Bitmap bit = SingletonBitmap.getInstance().getBitmap();
-            PosAPI.PrintBitmap(bit);
-
-            // --- FIX FOR ADAPTIVE ICON ---
-            Drawable drawable = resources.getDrawable(R.drawable.ic_launcher_foreground, null);
-            Bitmap bmp1 = null;
-            if (drawable != null) {
-                // Create a mutable bitmap to draw on
-                bmp1 = Bitmap.createBitmap(drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight(), Bitmap.Config.ARGB_8888);
-                Canvas canvas = new Canvas(bmp1);
-                drawable.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
-                drawable.draw(canvas);
-            }
-            // --- END OF FIX ---
-            Bitmap bmp2 = makeSmallerBitmap(bmp1, 384);
-            if(bmp2 != null){
-                String fileName = "order_logo_" + orderId + ".png";
-                saveBitmapToGallery(context, bmp2, fileName);
-                File slipFile = new File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), fileName);
-                Log.d(tag, "Slip image saved to: " + slipFile.getAbsolutePath());
-                ret = PosAPI.PrintBitmap(bmp2);
-                ret = PosAPI.PrintStart();
-            }
-
-
-        }
-    }
-
-    public boolean isThreadFinished() {
-        return m_bThreadFinished;
-    }
-
-
-    // ... existing code in SlipPrinter.java ...
-
-    // --- PASTE THIS METHOD HERE ---
-    private void saveBitmapToGallery(Context context, Bitmap bitmap, String displayName) {
-        if (bitmap == null) {
-            android.util.Log.e("SaveBitmap", "Bitmap is null, cannot save.");
-            return;
-        }
-
-        java.io.OutputStream fos = null;
         try {
-            android.content.ContentValues values = new android.content.ContentValues();
-            values.put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, displayName);
-            values.put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png");
+            // Step 2: Build Bill Receipt using Actual Data
+            val dateFormat = SimpleDateFormat(
+                "dd-MMM-yyyy HH:mm",
+                java.util.Locale.getDefault()
+            )
+            val dateStr = dateFormat.format(Date())
 
-            // Set the location to the public Pictures directory for Android 10+
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                values.put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES);
+            val sb = StringBuilder()
+
+            // -- Header --
+            sb.append("[C]<u><b>STREET FOOD & CAFE</b></u>\n")
+            sb.append("[C]Fresh & Tasty\n")
+            sb.append("[L]\n") // Empty line
+
+            // -- Order Info --
+            sb.append("[L]<b>Order No:</b> #$orderId\n")
+            sb.append("[L]<b>Date:</b> $dateStr\n")
+            sb.append("[L]<b>Name:</b> $customerName\n")
+            if (mobileNo.isNotEmpty()) {
+                sb.append("[L]<b>Mobile:</b> $mobileNo\n")
             }
 
-            android.net.Uri imageUri = context.getContentResolver().insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            sb.append("[C]--------------------------------\n")
+            sb.append("[L]<b>Item</b>[R]<b>Qty</b>[R]<b>Price</b>\n")
+            sb.append("[C]--------------------------------\n")
 
-            if (imageUri != null) {
-                fos = context.getContentResolver().openOutputStream(imageUri);
-                if (fos != null) {
-                    // Compress and save the bitmap
-                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
-                    // Show confirmation message
-                    android.widget.Toast.makeText(context, "Image saved to Gallery", android.widget.Toast.LENGTH_SHORT).show();
-                }
-            } else {
-                throw new java.io.IOException("Failed to create new MediaStore record.");
+            // -- Items Loop --
+            for (item in items) {
+                // Determine item name (append variant if not Standard)
+                // e.g. "Burger (Full)" or "Pizza"
+                val variantSuffix = if (item.variant != "Standard") "(${item.variant})" else ""
+                val itemName = "${item.item.foodName} $variantSuffix"
+
+                // Get values
+                // Note: CartItem uses MutableIntState for count in your UI, accessing .intValue here
+                val qty = item.count.intValue
+                val price = item.unitPrice * qty
+
+                // Format: Name on Left, Qty on Right, Price on Right
+                // Using [L] for name and [R] for columns is standard in this library
+                sb.append("[L]$itemName[R]x$qty[R]${"%.2f".format(price)}\n")
             }
 
-        } catch (Exception e) {
-            android.util.Log.e("SaveBitmap", "Error saving bitmap to gallery", e);
-            android.widget.Toast.makeText(context, "Failed to save image", android.widget.Toast.LENGTH_SHORT).show();
+            sb.append("[C]--------------------------------\n")
+
+            // -- Total --
+            sb.append("[R]TOTAL: <b>Rs.${"%.2f".format(totalAmount)}</b>\n")
+            sb.append("[C]================================\n")
+
+            // -- Footer --
+            sb.append("[L]\n")
+            sb.append("[C]Thank you! Visit Again\n")
+
+            // Optional: QR Code (if you have payment info)
+            // sb.append("[C]<qrcode size='20'>upi://pay?pa=yourupi@bank&pn=StreetFood</qrcode>\n")
+
+            // Step 3: Print
+            printer.printFormattedText(sb.toString())
+            Log.e("Print_text", sb.toString())
+            Toast.makeText(context, "✅ Bill Printed Successfully!", Toast.LENGTH_SHORT).show()
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(context, "❌ Print Error: ${e.message}", Toast.LENGTH_LONG).show()
         } finally {
-            try {
-                if (fos != null) {
-                    fos.close();
-                }
-            } catch (java.io.IOException e) {
-                e.printStackTrace();
-            }
+            // Usually good to disconnect, but if printing frequently, keeping it open might be faster.
+            // For this library, usually disconnect is safer.
+            // printer.disconnectPrinter()
         }
     }
-} // End of SlipPrinter class
 
-
-
+}
 
 

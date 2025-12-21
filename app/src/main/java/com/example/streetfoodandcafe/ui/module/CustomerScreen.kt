@@ -1,8 +1,13 @@
 package com.example.streetfoodandcafe.ui.module
 
-import android.content.Context
+import android.Manifest
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.util.Log
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,19 +26,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
 import com.example.streetfoodandcafe.R
 import com.example.streetfoodandcafe.db.AppDatabase
 import com.example.streetfoodandcafe.db.InventoryEntity
 import com.example.streetfoodandcafe.db.OrderWithItems
-import com.example.streetfoodandcafe.slip.SlipPrinterBitmap // Import Printer
-import com.example.streetfoodandcafe.ui.module.data.CartItem // Import CartItem wrapper
-import com.example.streetfoodandcafe.db.OrderItemEntity
 import com.example.streetfoodandcafe.slip.SlipPrinter
+import com.example.streetfoodandcafe.ui.module.data.CartItem // Import CartItem wrapper
 import kotlinx.coroutines.launch
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.core.net.toUri
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,6 +67,117 @@ fun CustomerScreen() {
         SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(it.order.orderDate))
     }
 
+    // --- BLUETOOTH PERMISSION LAUNCHER ---
+    // This state holds the action to perform after permissions are granted
+    var pendingPrintAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    val bluetoothPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        // Check if all required permissions are granted
+        val allGranted = permissions.entries.all { it.value }
+        if (allGranted) {
+            pendingPrintAction?.invoke() // Run the print action
+        } else {
+            Toast.makeText(context, "Bluetooth permissions are required to print.", Toast.LENGTH_SHORT).show()
+        }
+        pendingPrintAction = null // Reset
+    }
+    // Helper function to check and request permissions
+    fun checkAndPrint(action: () -> Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val permissionsToRequest = arrayOf(
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.BLUETOOTH_SCAN
+            )
+            // Launch permission request
+            pendingPrintAction = action
+            bluetoothPermissionLauncher.launch(permissionsToRequest)
+        } else {
+            // For Android 11 and below, just run the action (basic bluetooth doesn't need runtime permission usually, or location is needed)
+            action()
+        }
+    }
+    // --- NEW METHOD: Preview Bill in Browser/Viewer ---
+    fun previewBill(
+        customerName: String,
+        mobileNo: String,
+        items: List<CartItem>,
+        totalAmount: Double,
+        orderId: Long
+    ) {
+        try {
+            val dateFormat = SimpleDateFormat("dd-MMM-yyyy HH:mm", Locale.getDefault())
+            val dateStr = dateFormat.format(Date())
+
+            // 1. Build HTML String
+            val sb = StringBuilder()
+            sb.append("<html><body>")
+            sb.append("<div style='text-align:center; font-family: monospace;'>")
+
+            // Header
+            sb.append("<h2>STREET FOOD & CAFE</h2>")
+            sb.append("<p>Fresh & Tasty</p>")
+            sb.append("<hr>")
+
+            // Info
+            sb.append("<div style='text-align:left;'>")
+            sb.append("<p><b>Order No:</b> #$orderId<br>")
+            sb.append("<b>Date:</b> $dateStr<br>")
+            sb.append("<b>Name:</b> $customerName<br>")
+            if (mobileNo.isNotEmpty()) {
+                sb.append("<b>Mobile:</b> $mobileNo</p>")
+            }
+            sb.append("</div>")
+
+            sb.append("<hr>")
+
+            // Items Table
+            sb.append("<table style='width:100%; border-collapse:collapse;'>")
+            sb.append("<tr><th style='text-align:left;'>Item</th><th>Qty</th><th style='text-align:right;'>Price</th></tr>")
+
+            for (item in items) {
+                val variantSuffix = if (item.variant != "Standard") "(${item.variant})" else ""
+                val itemName = "${item.item.foodName} $variantSuffix"
+                val qty = item.count.intValue
+                val price = item.unitPrice * qty
+
+                sb.append("<tr>")
+                sb.append("<td style='text-align:left;'>$itemName</td>")
+                sb.append("<td style='text-align:center;'>x$qty</td>")
+                sb.append("<td style='text-align:right;'>${"%.2f".format(price)}</td>")
+                sb.append("</tr>")
+            }
+            sb.append("</table>")
+
+            sb.append("<hr>")
+
+            // Total
+            sb.append("<h3 style='text-align:right;'>TOTAL: Rs.${"%.2f".format(totalAmount)}</h3>")
+            sb.append("<hr>")
+
+            // Footer
+            sb.append("<p>Thank you! Visit Again</p>")
+            sb.append("</div></body></html>")
+            Log.e("Print_text", sb.toString())
+            val htmlContent = sb.toString()
+
+            // 2. Encode HTML for Data URI
+            val encodedHtml = Uri.encode(htmlContent)
+
+            // 3. Launch Intent
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                data = "data:text/html;charset=utf-8,$encodedHtml".toUri()
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+
+            context.startActivity(intent)
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(context, "Error opening preview: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
     Scaffold(
         floatingActionButton = {
             FloatingActionButton(
@@ -137,14 +250,9 @@ fun CustomerScreen() {
                                 inventoryMap = inventoryMap,
                                 onPrintClick = {
                                     // --- PRINT LOGIC ---
-                                    val printer = SlipPrinter(context)
-
-                                    // 1. Reconstruct CartItems from DB Entities
                                     val cartItemsForPrint = orderWithItems.items.mapNotNull { orderItem ->
                                         val inventoryEntity = inventoryMap[orderItem.foodItemId]
                                         if (inventoryEntity != null) {
-                                            // Determine variant name for printing
-                                            // Logic: If price matches full/half, label it. Else Standard.
                                             val variantName = if (inventoryEntity.isMultiPlate) {
                                                 when (orderItem.itemPriceAtTime) {
                                                     inventoryEntity.fullPlatePrice -> "Full"
@@ -155,9 +263,7 @@ fun CustomerScreen() {
                                                 "Standard"
                                             }
 
-                                            // Create a temporary CartItem for the printer
-                                            // Note: CartItem expects MutableIntState, we create one with static value
-                                         CartItem(
+                                            CartItem(
                                                 item = inventoryEntity,
                                                 variant = variantName,
                                                 unitPrice = orderItem.itemPriceAtTime,
@@ -167,16 +273,52 @@ fun CustomerScreen() {
                                             null
                                         }
                                     }
-
-                                    // 2. Call Printer
-                                    printer.clickAndPrint(
-                                        context,
-                                        orderWithItems.order.customerName,
-                                        orderWithItems.order.mobileNo,
-                                        cartItemsForPrint,
-                                        orderWithItems.order.totalAmount,
-                                        orderWithItems.order.orderId.toLong()
+                                    previewBill(
+                                        customerName = orderWithItems.order.customerName,
+                                        mobileNo = orderWithItems.order.mobileNo,
+                                        items = cartItemsForPrint,
+                                        totalAmount = orderWithItems.order.totalAmount,
+                                        orderId = orderWithItems.order.orderId.toLong()
                                     )
+
+                                  /*  checkAndPrint {
+                                        // --- PRINT LOGIC ---
+                                        val printerHelper = SlipPrinter(context)
+
+                                        // 1. Reconstruct CartItems from DB Entities
+                                        val cartItemsForPrint = orderWithItems.items.mapNotNull { orderItem ->
+                                            val inventoryEntity = inventoryMap[orderItem.foodItemId]
+                                            if (inventoryEntity != null) {
+                                                val variantName = if (inventoryEntity.isMultiPlate) {
+                                                    when (orderItem.itemPriceAtTime) {
+                                                        inventoryEntity.fullPlatePrice -> "Full"
+                                                        inventoryEntity.halfPlatePrice -> "Half"
+                                                        else -> "Custom"
+                                                    }
+                                                } else {
+                                                    "Standard"
+                                                }
+
+                                                CartItem(
+                                                    item = inventoryEntity,
+                                                    variant = variantName,
+                                                    unitPrice = orderItem.itemPriceAtTime,
+                                                    count = mutableIntStateOf(orderItem.quantityCount)
+                                                )
+                                            } else {
+                                                null
+                                            }
+                                        }
+
+                                        // 2. Call Printer Helper
+                                        printerHelper.printBill(
+                                            customerName = orderWithItems.order.customerName,
+                                            mobileNo = orderWithItems.order.mobileNo,
+                                            items = cartItemsForPrint,
+                                            totalAmount = orderWithItems.order.totalAmount,
+                                            orderId = orderWithItems.order.orderId.toLong()
+                                        )
+                                    }*/
 
                                     Toast.makeText(context, "Slip Generated for Order #${orderWithItems.order.orderId}", Toast.LENGTH_SHORT).show()
                                 }
